@@ -1,67 +1,55 @@
 import streamlit as st
 import pandas as pd
 
-# Sayfa Ayarları
-st.set_page_config(page_title="Rehabilitasyon Program Denetleyici", layout="wide")
+# 1. Menü Yapılandırması
+menu = ["Kayıt Paneli", "Öğrenci Takip", "Program Kontrol 🗓️"]
+choice = st.sidebar.selectbox("Menü", menu)
 
-st.title("🗓️ Akıllı Ders Programı ve Kontrol Paneli")
-st.markdown("Excel dosyanızı yükleyerek kontenjan ve güzergah kontrollerini yapabilirsiniz.")
-
-# 1. Dosya Yükleme Alanı
-uploaded_file = st.file_uploader("Program Excelini Yükleyin", type=["xlsx", "xls"])
-
-if uploaded_file:
-    # Excel'i oku
-    df = pd.read_excel(uploaded_file)
+# --- PROGRAM KONTROL SEKEMESİ ---
+if choice == "Program Kontrol 🗓️":
+    st.header("Akıllı Ders Programı ve Kontrol Paneli")
     
-    # Boşlukları temizle (Sütun isimlerinde hata olmaması için)
-    df.columns = df.columns.str.strip()
-
-    # --- KONTROL MEKANİZMASI ---
+    uploaded_file = st.file_uploader("Ders Programı Excelini Buraya Bırakın", type=["xlsx"])
     
-    # Gerekli sütunların varlığını kontrol et
-    required_cols = ['Adı', 'Soyadı', 'Saat', 'Ders Türü', 'Güzergah']
-    if all(col in df.columns for col in required_cols):
-        
-        # Dil ve Konuşma öğrencilerini filtrele (Küçük/büyük harf duyarlılığını azaltmak için)
-        dk_filtre = df[df['Ders Türü'].str.contains('Dil', case=False, na=False)]
-        
-        # Saatlere göre grupla ve say
-        saatlik_sayim = dk_filtre.groupby('Saat').size()
-        
-        # Hata veren (3'ten fazla olan) saatleri bul
-        hatali_saatler = saatlik_sayim[saatlik_sayim > 3]
+    if uploaded_file:
+        df = pd.read_excel(uploaded_file)
+        df.columns = df.columns.str.strip() # Başlık temizliği
 
-        # --- UYARI EKRANI ---
-        if not hatali_saatler.empty:
-            st.error(f"🚨 KRİTİK UYARI: Toplam {len(hatali_saatler)} farklı saat diliminde Dil ve Konuşma öğrenci sınırı aşıldı!")
+        # 2. Mantıksal Filtreler ve Kontroller
+        # Ders Türü sütununda "Dil" geçenleri bulur
+        dk_ogrencileri = df[df['Ders Türü'].str.contains('Dil', case=False, na=False)]
+        
+        # Saat başına öğrenci sayısını hesapla
+        saatlik_ozet = dk_ogrencileri.groupby('Saat').size()
+        
+        # 3 kişiyi geçen saatleri tespit et
+        asimi_yapanlar = saatlik_ozet[saatlik_ozet > 3]
+
+        # 3. Görsel Uyarılar
+        if not asimi_yapanlar.empty:
+            st.error(f"⚠️ DİKKAT: Dil ve Konuşma limitini aşan {len(asimi_yapanlar)} saat var!")
             
-            cols = st.columns(len(hatali_saatler) if len(hatali_saatler) < 4 else 4)
-            for i, (saat, sayi) in enumerate(hatali_saatler.items()):
-                with cols[i % 4]:
-                    st.metric(label=f"Saat: {saat}", value=f"{sayi} Öğrenci", delta="Limit Aşımı", delta_color="inverse")
+            # Yan yana metrikler halinde gösterelim
+            cols = st.columns(len(asimi_yapanlar))
+            for i, (saat, sayi) in enumerate(asimi_yapanlar.items()):
+                with cols[i]:
+                    st.metric(label=f"Saat: {saat}", value=f"{sayi} Kişi", delta="+3 Limit Aşımı", delta_color="inverse")
         else:
-            st.success("✅ Tüm saat dilimleri uygun. Dil ve Konuşma yoğunluğu limitlerin altında.")
+            st.success("✅ Dil ve Konuşma programı dengeli (Maksimum 3 öğrenci).")
 
-        # --- GÜZERGAH VE LİSTELEME ---
+        # 4. Güzergah Filtreleme (Sizin için lojistik kolaylık)
         st.divider()
-        col1, col2 = st.columns([1, 3])
-        
-        with col1:
-            st.subheader("🚐 Güzergah Filtresi")
-            secilen_guzergah = st.selectbox("Görüntülenecek Güzergah", ["Hepsi"] + list(df['Güzergah'].unique()))
-        
-        with col2:
-            st.subheader("📋 Ders Listesi")
-            if secilen_guzergah != "Hepsi":
-                gosterilecek_df = df[df['Güzergah'] == secilen_guzergah]
-            else:
-                gosterilecek_df = df
-            
-            st.dataframe(gosterilecek_df, use_container_width=True)
+        guzergahlar = ["Hepsi"] + list(df['Güzergah'].unique())
+        secilen_guzergah = st.selectbox("🚛 Güzergaha Göre Filtrele", guzergahlar)
 
+        if secilen_guzergah != "Hepsi":
+            gosterilecek_df = df[df['Güzergah'] == secilen_guzergah]
+        else:
+            gosterilecek_df = df
+
+        st.dataframe(gosterilecek_df, use_container_width=True)
+        
     else:
-        st.warning(f"Lütfen Excel dosyanızdaki sütun isimlerinin şunlar olduğundan emin olun: {', '.join(required_cols)}")
+        st.info("Lütfen güncel ders programı dosyanızı yükleyin.")
 
-else:
-    st.info("Sistemin çalışması için lütfen üstteki alandan ders programı Excel'inizi yükleyin.")
+# Diğer menü seçenekleriniz (Kayıt Paneli vb.) buranın altında devam eder...

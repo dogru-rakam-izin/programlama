@@ -2,17 +2,17 @@ import streamlit as st
 import pandas as pd
 import io
 
-st.set_page_config(page_title="Rehabilitasyon Denetim Sistemi", layout="wide")
+st.set_page_config(page_title="Doğru Rakam Akademi - Denetim", layout="wide")
 
 st.title("🎯 Akıllı Program Denetleyicisi")
-st.markdown("Ana listedeki Ad/Soyad sütunlarını birleştirerek günlük çizelgeyle eşleştirir.")
+st.markdown("Ad ve Soyad sütunlarını güvenli şekilde birleştirerek denetim yapar.")
 
 # 1. DOSYA YÜKLEME
 col1, col2 = st.columns(2)
 with col1:
     master_file = st.file_uploader("📋 1. Ana Öğrenci Listesini Yükleyin", type=["xlsx", "csv"])
 with col2:
-    daily_file = st.file_uploader("🗓️ 2. Günlük Çizelgeyi Yükleyin (SALI, CUMA vb.)", type=["csv"])
+    daily_file = st.file_uploader("🗓️ 2. Günlük Çizelgeyi Yükleyin (CSV)", type=["csv"])
 
 if master_file and daily_file:
     try:
@@ -22,33 +22,36 @@ if master_file and daily_file:
         else:
             m_df = pd.read_excel(master_file)
         
-        # Orijinal sütun isimlerini sakla (hata mesajı için)
-        original_cols = list(m_df.columns)
-        # Sütun isimlerini analiz için temizle
+        # Sütun isimlerini temizle
         m_df.columns = [str(c).strip().lower() for c in m_df.columns]
         
-        # AD ve SOYAD sütunlarını daha geniş bir taramayla bul
-        # 'ad', 'isim', 'öğrenci' gibi kelimeleri arar
+        # AD ve SOYAD sütunlarını bul
         ad_col = next((c for c in m_df.columns if 'ad' in c and 'soyad' not in c), None)
         soyad_col = next((c for c in m_df.columns if 'soyad' in c), None)
         
+        m_isim_col = None
         if ad_col and soyad_col:
-            # İki sütunu birleştirip 'tam_isim' oluştur
-            m_df['tam_isim'] = m_df[ad_col].astype(str) + " " + m_df[soyad_col].astype(str)
-            m_df['tam_isim'] = m_df['tam_isim'].str.strip().lower()
+            # HATA ÇÖZÜMÜ: Sütunları önce stringe çevir, boşları boşlukla doldur, sonra küçük harf yap
+            m_df['tam_isim'] = (
+                m_df[ad_col].astype(str).replace('nan', '').str.strip() + " " + 
+                m_df[soyad_col].astype(str).replace('nan', '').str.strip()
+            ).str.lower()
             m_isim_col = 'tam_isim'
-            st.sidebar.success(f"Eşleşme Yapıldı: {ad_col} + {soyad_col}")
+            st.sidebar.success(f"Eşleştirme Başarılı: {ad_col} + {soyad_col}")
         else:
-            # Tek bir birleşik sütun var mı bak (Ad Soyad gibi)
+            # Tek bir birleşik sütun varsa (Ad Soyad gibi)
             m_isim_col = next((c for c in m_df.columns if 'ad' in c and 'soyad' in c), None)
+            if m_isim_col:
+                m_df[m_isim_col] = m_df[m_isim_col].astype(str).str.lower().str.strip()
 
-        # Branş ve Güzergah sütunlarını bul
+        # Branş ve Güzergah sütunları
         m_ders_col = next((c for c in m_df.columns if any(k in c for k in ['ders', 'branş', 'engel', 'grup'])), None)
         m_guz_col = next((c for c in m_df.columns if any(k in c for k in ['güz', 'servis', 'güzergah', 'tur'])), None)
 
         # --- GÜNLÜK ÇİZELGEYİ OKU ---
         content = daily_file.getvalue().decode('utf-8', errors='ignore')
         ayirici = ';' if ';' in content.splitlines()[0] else ','
+        # İlk satırı (gün adı) atla
         d_df = pd.read_csv(io.StringIO(content), sep=ayirici, skiprows=1)
         d_df.columns = [str(c).strip() for c in d_df.columns]
 
@@ -71,14 +74,14 @@ if master_file and daily_file:
                                 "Saat": saat,
                                 "Personel": personel,
                                 "Öğrenci": cizelge_ismi.upper(),
-                                "Branş": bilgi.get(m_ders_col, "Belirtilmemiş") if m_ders_col else "Sütun Bulunamadı",
-                                "Güzergah": bilgi.get(m_guz_col, "Belirtilmemiş") if m_guz_col else "Sütun Bulunamadı",
-                                "Durum": "✅ Onaylı"
+                                "Branş": bilgi.get(m_ders_col, "Belirtilmemiş") if m_ders_col else "Bilinmiyor",
+                                "Güzergah": bilgi.get(m_guz_col, "Belirtilmemiş") if m_guz_col else "Bilinmiyor",
+                                "Durum": "✅ Kayıtlı"
                             })
                         else:
                             denetim_sonuclari.append({
                                 "Saat": saat, "Personel": personel, "Öğrenci": cizelge_ismi.upper(),
-                                "Branş": "Eşleşme Yok", "Güzergah": "Eşleşme Yok", "Durum": "⚠️ Kayıt Bulunamadı"
+                                "Branş": "Eşleşme Yok", "Güzergah": "Eşleşme Yok", "Durum": "⚠️ Liste Dışı"
                             })
 
             analiz_df = pd.DataFrame(denetim_sonuclari)
@@ -95,17 +98,15 @@ if master_file and daily_file:
 
                 if not hatalar.empty:
                     for s, sayi in hatalar.items():
-                        st.error(f"**Saat {s}:** {sayi} Dil Konuşma öğrencisi tespit edildi!")
+                        st.error(f"**Saat {s}:** {sayi} Dil Konuşma öğrencisi var!")
                 else:
                     st.success("Tüm saatler kontenjana uygundur.")
 
-            st.subheader("📋 Günlük Program Detay Analizi")
+            st.subheader("📋 Detaylı Analiz Listesi")
             st.dataframe(analiz_df, use_container_width=True)
-
         else:
-            st.error("Hata: Ana listede isim sütunu (Adı ve Soyadı) tespit edilemedi.")
-            st.info(f"Yüklediğiniz dosyadaki sütunlar şunlar: {original_cols}")
-            st.warning("Lütfen Excel dosyanızdaki başlıkların 'Adı' ve 'Soyadı' içerdiğinden emin olun.")
+            st.error("Hata: Ana listede isim sütunları (Ad / Soyad) bulunamadı.")
+            st.info(f"Mevcut sütunlar: {list(m_df.columns)}")
 
     except Exception as e:
         st.error(f"Teknik bir sorun oluştu: {e}")

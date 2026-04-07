@@ -1,55 +1,61 @@
 import streamlit as st
 import pandas as pd
 
-# 1. Menü Yapılandırması
+# 1. HAFIZA BAŞLATMA (Verilerin kaybolmaması için)
+if 'ogrenci_verisi' not in st.session_state:
+    st.session_state.ogrenci_verisi = None
+
+# Yan Menü
 menu = ["Kayıt Paneli", "Öğrenci Takip", "Program Kontrol 🗓️"]
 choice = st.sidebar.selectbox("Menü", menu)
 
-# --- PROGRAM KONTROL SEKEMESİ ---
-if choice == "Program Kontrol 🗓️":
-    st.header("Akıllı Ders Programı ve Kontrol Paneli")
+# --- KAYIT PANELİ (Veri Giriş Alanı) ---
+if choice == "Kayıt Paneli":
+    st.header("📝 Yeni Öğrenci Kaydı")
+    # Burada manuel kayıt formunuz olduğunu varsayıyorum
+    # Örnek: st.text_input("Adı"), st.button("Kaydet") vb.
+    st.info("Manuel kayıt formunu buraya ekleyebilirsiniz. Şu an Excel yükleme odaklı ilerliyoruz.")
+
+# --- PROGRAM KONTROL (Excel Yükleme ve Uyarı) ---
+elif choice == "Program Kontrol 🗓️":
+    st.header("🗓️ Program Denetleme ve Veri Yükleme")
     
-    uploaded_file = st.file_uploader("Ders Programı Excelini Buraya Bırakın", type=["xlsx"])
+    uploaded_file = st.file_uploader("Güncel Excel Dosyasını Yükleyin", type=["xlsx"])
     
     if uploaded_file:
         df = pd.read_excel(uploaded_file)
-        df.columns = df.columns.str.strip() # Başlık temizliği
-
-        # 2. Mantıksal Filtreler ve Kontroller
-        # Ders Türü sütununda "Dil" geçenleri bulur
+        df.columns = df.columns.str.strip()
+        
+        # YÜKLENEN VERİYİ HAFIZAYA AL (Diğer sekmelerde görmek için)
+        st.session_state.ogrenci_verisi = df
+        
+        # Kontroller (Dil Konuşma Sınırı)
         dk_ogrencileri = df[df['Ders Türü'].str.contains('Dil', case=False, na=False)]
-        
-        # Saat başına öğrenci sayısını hesapla
-        saatlik_ozet = dk_ogrencileri.groupby('Saat').size()
-        
-        # 3 kişiyi geçen saatleri tespit et
-        asimi_yapanlar = saatlik_ozet[saatlik_ozet > 3]
+        saatlik_sayim = dk_ogrencileri.groupby('Saat').size()
+        asimi_yapanlar = saatlik_sayim[saatlik_sayim > 3]
 
-        # 3. Görsel Uyarılar
         if not asimi_yapanlar.empty:
-            st.error(f"⚠️ DİKKAT: Dil ve Konuşma limitini aşan {len(asimi_yapanlar)} saat var!")
+            st.error(f"⚠️ Dil Konuşma Sınırı Aşıldı!")
+            st.write(asimi_yapanlar)
+        else:
+            st.success("✅ Program kurallara uygun.")
             
-            # Yan yana metrikler halinde gösterelim
-            cols = st.columns(len(asimi_yapanlar))
-            for i, (saat, sayi) in enumerate(asimi_yapanlar.items()):
-                with cols[i]:
-                    st.metric(label=f"Saat: {saat}", value=f"{sayi} Kişi", delta="+3 Limit Aşımı", delta_color="inverse")
-        else:
-            st.success("✅ Dil ve Konuşma programı dengeli (Maksimum 3 öğrenci).")
+        st.dataframe(df)
 
-        # 4. Güzergah Filtreleme (Sizin için lojistik kolaylık)
-        st.divider()
-        guzergahlar = ["Hepsi"] + list(df['Güzergah'].unique())
-        secilen_guzergah = st.selectbox("🚛 Güzergaha Göre Filtrele", guzergahlar)
-
-        if secilen_guzergah != "Hepsi":
-            gosterilecek_df = df[df['Güzergah'] == secilen_guzergah]
-        else:
-            gosterilecek_df = df
-
-        st.dataframe(gosterilecek_df, use_container_width=True)
+# --- ÖĞRENCİ TAKİP (Hafızadaki Veriyi Gösteren Yer) ---
+elif choice == "Öğrenci Takip":
+    st.header("🔍 Kayıtlı Öğrenci Listesi")
+    
+    # Hafızada veri var mı kontrol et
+    if st.session_state.ogrenci_verisi is not None:
+        veri = st.session_state.ogrenci_verisi
         
+        # Arama kutusu ekleyelim
+        arama = st.text_input("Öğrenci Adı ile Ara")
+        if arama:
+            filtreli_veri = veri[veri['Adı'].str.contains(arama, case=False, na=False)]
+            st.dataframe(filtreli_veri)
+        else:
+            st.dataframe(veri)
     else:
-        st.info("Lütfen güncel ders programı dosyanızı yükleyin.")
-
-# Diğer menü seçenekleriniz (Kayıt Paneli vb.) buranın altında devam eder...
+        st.warning("⚠️ Henüz bir veri yüklenmedi. Lütfen 'Program Kontrol' sekmesinden Excel dosyasını yükleyin.")

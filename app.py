@@ -1,87 +1,71 @@
 import streamlit as st
 import pandas as pd
 
-# 1. HAFIZA YAPILANDIRMASI
-st.set_page_config(page_title="Doğru Rakam Akademi - Program Denetçi", layout="wide")
+st.set_page_config(page_title="Rehabilitasyon Çakışma Denetleyici", layout="wide")
 
-if 'program_data' not in st.session_state:
-    st.session_state.program_data = None
+if 'df' not in st.session_state:
+    st.session_state.df = None
 
-# Yan Menü
-st.sidebar.image("https://via.placeholder.com/150?text=REHAB+LOGO") # İsterseniz kurum logonuzu koyabilirsiniz
-menu = ["🏠 Ana Sayfa", "📤 Program Yükle ve Denetle", "🔍 Öğrenci Sorgula"]
-choice = st.sidebar.selectbox("Menü", menu)
+st.title("⚖️ Program Çakışma ve Güzergah Denetimi")
 
-# --- ANA SAYFA ---
-if choice == "🏠 Ana Sayfa":
-    st.title("Rehabilitasyon Merkezi Program Yönetimi")
-    st.info("Sol menüden 'Program Yükle' kısmına geçerek günlük CSV dosyanızı sisteme tanıtabilirsiniz.")
-    
-    if st.session_state.program_data is not None:
-        st.success(f"Sistemde şu an aktif bir program yüklü ({len(st.session_state.program_data)} kayıt).")
-    else:
-        st.warning("Şu an sistemde yüklü bir program bulunmuyor.")
+uploaded_file = st.file_uploader("Program CSV dosyasını yükleyin", type=["csv"])
 
-# --- PROGRAM YÜKLE VE DENETLE ---
-elif choice == "📤 Program Yükle ve Denetle":
-    st.header("Günlük Program Denetimi")
-    
-    file = st.file_uploader("CSV dosyasını buraya yükleyin", type=["csv"])
-    
-    if file:
-        try:
-            # Dosyanızdaki noktalı virgül (;) ayrımını otomatik çözen ayar:
-            df = pd.read_csv(file, sep=';', encoding='utf-8')
-            
-            # Sütun isimlerini temizle
-            df.columns = [str(c).strip() for c in df.columns]
-            st.session_state.program_data = df
-            
-            # --- 3 ÖĞRENCİ SINIRI KONTROLÜ ---
-            st.subheader("⚠️ Kontenjan Kontrolü")
-            
-            # "Dil ve Konuşma" veya "Dil Konuşma" içerenleri yakala
-            dk_filtre = df[df['Ders Türü'].str.contains('Dil', case=False, na=False)]
-            
-            # Saate göre grupla
-            saatlik_sayim = dk_filtre.groupby('Saat').size()
-            limit_asanlar = saatlik_sayim[saatlik_sayim > 3]
+if uploaded_file:
+    try:
+        # Dosyanızdaki noktalı virgül yapısına göre okuma
+        df = pd.read_csv(uploaded_file, sep=';', encoding='utf-8')
+        df.columns = [c.strip() for c in df.columns]
+        st.session_state.df = df
 
-            if not limit_asanlar.empty:
-                st.error(f"DİKKAT: Aşağıdaki saatlerde 3 öğrenci sınırı aşılmıştır!")
-                for saat, sayi in limit_asanlar.items():
-                    st.warning(f"🕒 **Saat {saat}:** {sayi} Dil Konuşma Öğrencisi Tespit Edildi.")
-            else:
-                st.success("✅ Harika! Tüm Dil Konuşma seansları limit (3) dahilinde.")
-
-            # Tabloyu Göster
-            st.divider()
-            st.dataframe(df, use_container_width=True)
-            
-        except Exception as e:
-            st.error(f"Dosya okunurken bir hata oluştu: {e}")
-
-# --- ÖĞRENCİ SORGULA ---
-elif choice == "🔍 Öğrenci Sorgula":
-    st.header("Öğrenci ve Güzergah Takibi")
-    
-    if st.session_state.program_data is not None:
-        df = st.session_state.program_data
+        # --- 1. AYNI SAATTEKİ TÜM ÇAKIŞMALAR ---
+        st.subheader("🕵️ Saatlik Genel Yoğunluk")
         
-        c1, c2 = st.columns(2)
-        with c1:
-            guzergah_list = ["Hepsi"] + list(df['Güzergah'].dropna().unique())
-            secilen_guz = st.selectbox("Güzergah Seçin", guzergah_list)
-        with c2:
-            arama = st.text_input("Öğrenci İsmi Yazın")
+        # Her saatte kaç öğrenci olduğunu say
+        saat_ozet = df.groupby('Saat').agg(
+            Ogrenci_Sayisi=('Adı', 'count'),
+            Guzergahlar=('Güzergah', lambda x: ", ".join(x.unique()))
+        ).reset_index()
 
-        # Filtreleme
-        temp_df = df.copy()
-        if secilen_guz != "Hepsi":
-            temp_df = temp_df[temp_df['Güzergah'] == secilen_guz]
-        if arama:
-            temp_df = temp_df[temp_df['Adı'].str.contains(arama, case=False, na=False)]
+        # Tabloyu göster
+        st.dataframe(saat_ozet, use_container_width=True)
 
-        st.table(temp_df)
-    else:
-        st.info("Lütfen önce program dosyasını yükleyin.")
+        # --- 2. GÜZERGAH UYGUNLUK DENETİMİ ---
+        st.subheader("🚐 Güzergah Çakışma Analizi")
+        st.info("Aynı saatte farklı güzergahlara gitmesi gereken öğrenciler servis planını zorlaştırabilir. Aşağıda bu durumlar listelenmiştir:")
+
+        # Aynı saatte birden fazla BENZERSİZ güzergah olan saatleri bul
+        cakisma_listesi = []
+        for saat in df['Saat'].unique():
+            saatlik_dilim = df[df['Saat'] == saat]
+            farkli_guzergahlar = saatlik_dilim['Güzergah'].dropna().unique()
+            
+            if len(farkli_guzergahlar) > 1:
+                cakisma_listesi.append({
+                    "Saat": saat,
+                    "Öğrenci Sayısı": len(saatlik_dilim),
+                    "Çakışan Güzergahlar": " ↔️ ".join(farkli_guzergahlar),
+                    "Öğrenciler": ", ".join(saatlik_dilim['Adı'].tolist())
+                })
+
+        if cakisma_listesi:
+            cakisma_df = pd.DataFrame(cakisma_listesi)
+            st.warning(f"⚠️ Toplam {len(cakisma_df)} saat diliminde güzergah karmaşası tespit edildi!")
+            st.table(cakisma_df)
+        else:
+            st.success("✅ Güzergahlar saatlere göre uyumlu görünüyor.")
+
+        # --- 3. ÖZEL DERS TÜRÜ KONTROLÜ (DİKKAT!) ---
+        st.subheader("🗣️ Dil Konuşma Kontenjanı (Maks: 3)")
+        dk_df = df[df['Ders Türü'].str.contains('Dil', case=False, na=False)]
+        dk_sayim = dk_df.groupby('Saat').size()
+        dk_hata = dk_sayim[dk_sayim > 3]
+
+        if not dk_hata.empty:
+            for s, sayi in dk_hata.items():
+                st.error(f"❌ Saat {s}: {sayi} Dil Konuşma öğrencisi var! (Limit 3)")
+
+    except Exception as e:
+        st.error(f"Dosya işlenirken hata oluştu. Lütfen CSV formatını kontrol edin. Hata: {e}")
+
+else:
+    st.write("Lütfen analiz için sol taraftan dosyanızı seçin.")
